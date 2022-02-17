@@ -1,0 +1,1 @@
+CREATE TABLE users (id SERIAL PRIMARY KEY, first_name varchar(250), last_name VARCHAR(250),  email VARCHAR(200) NOT NULL UNIQUE, passcode VARCHAR(100), created TIMESTAMP NOT NULL DEFAULT NOW(), passcode_created TIMESTAMP, last_seen TIMESTAMP DEFAULT now());

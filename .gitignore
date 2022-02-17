@@ -1,0 +1,7 @@
+.vscode
+venv
+_labs
+*.pyc
+__pycache__
+temp/*
+!temp/.gitkeep
