@@ -27,7 +27,7 @@ class DB():
 
     def __init__(self):
         urllib.parse.uses_netloc.append("postgres")
-        url = urllib.parse.urlparse(os.get_env("DATABASE_URL"))
+        url = urllib.parse.urlparse(os.getenv("DATABASE_URL"))
 
         self.connection = psycopg2.connect(
             database=url.path[1:],
@@ -89,7 +89,7 @@ class DB():
 
     def login_user(self,email,passcode,passcode_bypass=False):
         cursor = self.get_cursor()
-        cursor.execute("SELECT * FROM users WHERE email = %s and disabled=FALSE",[email])
+        cursor.execute("SELECT * FROM users WHERE email = %s",[email])
         row = cursor.fetchone()
         if not row:
             return {
@@ -150,7 +150,7 @@ class DB():
                 return current_passcode
 
         passcode = self.create_passcode()
-        cursor.execute("UPDATE users SET passcode=%s, passcode_created=%s WHERE email=%s AND disabled=FALSE RETURNING id",[passcode,datetime.now(),email])
+        cursor.execute("UPDATE users SET passcode=%s, passcode_created=%s WHERE email=%s RETURNING id",[passcode,datetime.now(),email])
         self.connection.commit()
         _id = False
         result = cursor.fetchone()

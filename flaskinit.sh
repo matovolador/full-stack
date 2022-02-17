@@ -5,7 +5,7 @@ cd $path
 python3 -m venv venv
 source venv/bin/activate
 pip install wheel || exit 1
-pip install flask flask_cors flask_ssl mypy psycopg2 requests jwt python-dotenv gunicorn || exit 1
+pip install flask flask_cors flask_sslify mypy psycopg2 requests PyJWT python-dotenv coverage gunicorn || exit 1
 pip freeze > requirements.txt
 
 modules_path = ""
@@ -34,13 +34,63 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s', datefmt='%Y-%m-%d:%H:%M:%S')
 
-MAILGUN_API_KEY = os.get_env("MAILGUN_API_KEY")
+MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
 TOKEN_LIFE_MINUTES = 60
 
 app = Flask(__name__)
+app.secret_key = 'asd123asd12341asd123'
+CORS(app, supports_credentials=True)
+sslify = SSLify(app)
 
 
-@app.route("/")
+def token_required(f):
+    @wraps(f)
+    def decorated(*args,**kwargs):
+        db = DB()
+        token = None
+
+        if 'x-access-token' in request.headers:
+            token = request.headers['x-access-token']
+
+        if not token:
+            db.connection.close()
+            return jsonify({
+                "success": False,
+                "message": "Token is missing!"
+            }), 401
+
+        try:
+            data = jwt.decode(token,app.secret_key)
+            # validate token life:
+            life = data['exp']
+            rnow = int(datetime.now().timestamp())
+            if rnow > life:
+                db.connection.close()
+                # token no longer valid:
+                return jsonify({
+                    "message":"Token has expired. Please login again.",
+                    "success": False
+                }), 401
+            current_user = db.get_user_by_email(data['email'])
+            if is_admin({'email':data['email']}):
+                current_user['admin'] = True
+
+        except Exception as e:
+            db.connection.close()
+            return jsonify({
+                "message": "Token is invalid. "+str(e),
+                "success": False
+            }), 401
+        db.connection.close()
+        if not current_user:
+            return jsonify({
+                    "message": "User is invalid",
+                    "success": False
+                }), 401
+        return f(current_user,*args,**kwargs)
+    return decorated
+
+@app.route("/health")
 def index():
     return jsonify({
         "success": True,
@@ -120,7 +170,7 @@ def login():
             return jsonify({
                 "success": True,
                 "message": "You are now logged in.",
-                "token": token.decode('UTF-8'),
+                "token": token,
                 "created_at": result['data']['created'].timestamp(),
                 "first_name": result['data']['first_name'],
                 "last_name": result['data']['last_name'],
@@ -169,7 +219,7 @@ def renew_token(current_user):
     token = generate_token(current_user)
     
     return jsonify({
-        "token": token.decode('UTF-8'),
+        "token": token,
         "success": True,
         "created_at": current_user['created'].timestamp(),
         "first_name": current_user['first_name'],
@@ -187,68 +237,25 @@ def generate_token(user):
         token = jwt.encode({'email':user['email'],'exp':exp},app.secret_key)
     return token
 
-def token_required(f):
-    @wraps(f)
-    def decorated(*args,**kwargs):
-        db = DB()
-        token = None
-
-        if 'x-access-token' in request.headers:
-            token = request.headers['x-access-token']
-
-        if not token:
-            db.connection.close()
-            return jsonify({
-                "success": False,
-                "message": "Token is missing!"
-            }), 401
-
-        try:
-            data = jwt.decode(token,app.secret_key)
-            # validate token life:
-            life = data['exp']
-            rnow = int(datetime.now().timestamp())
-            if rnow > life:
-                db.connection.close()
-                # token no longer valid:
-                return jsonify({
-                    "message":"Token has expired. Please login again.",
-                    "success": False
-                }), 401
-            current_user = db.get_user_by_email(data['email'])
-            if is_admin({'email':data['email']}):
-                current_user['admin'] = True
-
-        except Exception as e:
-            db.connection.close()
-            return jsonify({
-                "message": "Token is invalid. "+str(e),
-                "success": False
-            }), 401
-        db.connection.close()
-        if not current_user:
-            return jsonify({
-                    "message": "User is invalid",
-                    "success": False
-                }), 401
-        return f(current_user,*args,**kwargs)
-    return decorated
-
 def send_passcode(to_email, template, subject):
-    r = requests.post(
-        "https://api.mailgun.net/v3/mg.company.com/messages",
-        auth=("api", MAILGUN_API_KEY),
-        data={"from": "Company<mailgun@mg.company.com>",
-            "to": [to_email],
-            "subject": subject,
-            "html": template
-    })
-    return r.json()['id'].replace('<','').replace('>','')
+    # r = requests.post(
+    #     "https://api.mailgun.net/v3/mg.company.com/messages",
+    #     auth=("api", MAILGUN_API_KEY),
+    #     data={"from": "Company<mailgun@mg.company.com>",
+    #         "to": [to_email],
+    #         "subject": subject,
+    #         "html": template
+    # })
+    # return r.json()['id'].replace('<','').replace('>','')
+
+    # Placeholder
+    return "secret_message_id"
 
 
 if __name__ == "__main__":
-        app.secret_key = 'secret123'
-        app.run(debug=True)
+        app.run(debug=True,port=5050)
+
+
 
 EOF
 cat <<EOF >.env
@@ -291,7 +298,7 @@ class DB():
 
     def __init__(self):
         urllib.parse.uses_netloc.append("postgres")
-        url = urllib.parse.urlparse(os.get_env("DATABASE_URL"))
+        url = urllib.parse.urlparse(os.getenv("DATABASE_URL"))
 
         self.connection = psycopg2.connect(
             database=url.path[1:],
@@ -353,7 +360,7 @@ class DB():
 
     def login_user(self,email,passcode,passcode_bypass=False):
         cursor = self.get_cursor()
-        cursor.execute("SELECT * FROM users WHERE email = %s and disabled=FALSE",[email])
+        cursor.execute("SELECT * FROM users WHERE email = %s",[email])
         row = cursor.fetchone()
         if not row:
             return {
@@ -414,7 +421,7 @@ class DB():
                 return current_passcode
 
         passcode = self.create_passcode()
-        cursor.execute("UPDATE users SET passcode=%s, passcode_created=%s WHERE email=%s AND disabled=FALSE RETURNING id",[passcode,datetime.now(),email])
+        cursor.execute("UPDATE users SET passcode=%s, passcode_created=%s WHERE email=%s RETURNING id",[passcode,datetime.now(),email])
         self.connection.commit()
         _id = False
         result = cursor.fetchone()
@@ -430,18 +437,94 @@ class DB():
         size = 6
         return ''.join(random.choices(string.digits, k=size))
 
+
 EOF
 
 cd ..
 cd sql
 cat <<EOF >schema.sql
 CREATE TABLE users (id SERIAL PRIMARY KEY, first_name varchar(250), last_name VARCHAR(250),  email VARCHAR(200) NOT NULL UNIQUE, passcode VARCHAR(100), created TIMESTAMP NOT NULL DEFAULT NOW(), passcode_created TIMESTAMP, last_seen TIMESTAMP DEFAULT now());
+
+
+INSERT INTO users (first_name,last_name,email,passcode,passcode_created,last_seen) VALUES ('Matias','Garafoni','matias.garafoni@gmail.com',12345,NOW(),NOW());
 EOF
 
 cd ..
 cd temp
 touch .gitkeep
 cd ..
+
+cat <<EOF >coverageme.sh
+source venv/bin/activate
+coverage run tests.py || exit 1
+coverage xml
+coverage lcov
+coverage html
+genbadge coverage -i - < coverage.xml
+EOF
+
+cat <<EOF >tests.py
+import traceback
+import unittest, os, json, io
+from __init__ import app as client_app
+import requests
+from base64 import b64encode
+from datetime import datetime
+
+
+from modules.db import DB
+
+
+
+class Tests(unittest.TestCase):
+    def __init__(self):
+        super().__init__()
+        client_app.debug = True
+        self.client = client_app.test_client()
+        self.token = ""
+        self.user_id = -1
+
+    def test_1_get_health(self):
+        r = self.client.get("/health")
+        print(r.data)
+        r_json = json.loads(r.data)
+        self.assertEqual(r.status_code,200)
+        self.assertEqual(r_json['success'],True)
+        print("Test 1 Completed.")
+
+
+    def test_2_login(self,email,sleep_=15):
+        r = self.client.get("/login?email="+str(email.replace("+","%2B")))
+        r_json = json.loads(r.data)
+        print(r_json)
+        self.assertEqual(r_json['success'],True)
+        
+        db = DB()
+        user = db.get_user_by_email(email)
+        db.connection.close()
+        if user:
+            passcode = user['passcode']
+        else:
+            print("Could not find user")
+            self.assertEqual(True,False)
+
+        credentials = b64encode((email+":"+str(passcode)).encode("utf-8")).decode('utf-8')
+        r = self.client.post("/login",headers={"Authorization": f"Basic {credentials}"})
+        print(r)
+        r_json = json.loads(r.data)
+        print(r_json)
+        self.token = r_json['token']
+        self.user_id = r_json['user_id']
+        print(self.token)
+
+        print("Test 2 Completed.")
+
+if __name__ == "__main__":
+    tester = Tests()
+    tester.test_1_get_health()
+    tester.test_2_login(email="matias.garafoni@gmail.com")
+EOF
+
 git init
 cat <<EOF >.gitignore
 .vscode

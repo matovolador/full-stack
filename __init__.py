@@ -14,13 +14,63 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s', datefmt='%Y-%m-%d:%H:%M:%S')
 
-MAILGUN_API_KEY = os.get_env("MAILGUN_API_KEY")
+MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY")
 TOKEN_LIFE_MINUTES = 60
 
 app = Flask(__name__)
+app.secret_key = 'asd123asd12341asd123'
+CORS(app, supports_credentials=True)
+sslify = SSLify(app)
 
 
-@app.route("/")
+def token_required(f):
+    @wraps(f)
+    def decorated(*args,**kwargs):
+        db = DB()
+        token = None
+
+        if 'x-access-token' in request.headers:
+            token = request.headers['x-access-token']
+
+        if not token:
+            db.connection.close()
+            return jsonify({
+                "success": False,
+                "message": "Token is missing!"
+            }), 401
+
+        try:
+            data = jwt.decode(token,app.secret_key)
+            # validate token life:
+            life = data['exp']
+            rnow = int(datetime.now().timestamp())
+            if rnow > life:
+                db.connection.close()
+                # token no longer valid:
+                return jsonify({
+                    "message":"Token has expired. Please login again.",
+                    "success": False
+                }), 401
+            current_user = db.get_user_by_email(data['email'])
+            if is_admin({'email':data['email']}):
+                current_user['admin'] = True
+
+        except Exception as e:
+            db.connection.close()
+            return jsonify({
+                "message": "Token is invalid. "+str(e),
+                "success": False
+            }), 401
+        db.connection.close()
+        if not current_user:
+            return jsonify({
+                    "message": "User is invalid",
+                    "success": False
+                }), 401
+        return f(current_user,*args,**kwargs)
+    return decorated
+
+@app.route("/health")
 def index():
     return jsonify({
         "success": True,
@@ -100,7 +150,7 @@ def login():
             return jsonify({
                 "success": True,
                 "message": "You are now logged in.",
-                "token": token.decode('UTF-8'),
+                "token": token,
                 "created_at": result['data']['created'].timestamp(),
                 "first_name": result['data']['first_name'],
                 "last_name": result['data']['last_name'],
@@ -149,7 +199,7 @@ def renew_token(current_user):
     token = generate_token(current_user)
     
     return jsonify({
-        "token": token.decode('UTF-8'),
+        "token": token,
         "success": True,
         "created_at": current_user['created'].timestamp(),
         "first_name": current_user['first_name'],
@@ -167,66 +217,21 @@ def generate_token(user):
         token = jwt.encode({'email':user['email'],'exp':exp},app.secret_key)
     return token
 
-def token_required(f):
-    @wraps(f)
-    def decorated(*args,**kwargs):
-        db = DB()
-        token = None
-
-        if 'x-access-token' in request.headers:
-            token = request.headers['x-access-token']
-
-        if not token:
-            db.connection.close()
-            return jsonify({
-                "success": False,
-                "message": "Token is missing!"
-            }), 401
-
-        try:
-            data = jwt.decode(token,app.secret_key)
-            # validate token life:
-            life = data['exp']
-            rnow = int(datetime.now().timestamp())
-            if rnow > life:
-                db.connection.close()
-                # token no longer valid:
-                return jsonify({
-                    "message":"Token has expired. Please login again.",
-                    "success": False
-                }), 401
-            current_user = db.get_user_by_email(data['email'])
-            if is_admin({'email':data['email']}):
-                current_user['admin'] = True
-
-        except Exception as e:
-            db.connection.close()
-            return jsonify({
-                "message": "Token is invalid. "+str(e),
-                "success": False
-            }), 401
-        db.connection.close()
-        if not current_user:
-            return jsonify({
-                    "message": "User is invalid",
-                    "success": False
-                }), 401
-        return f(current_user,*args,**kwargs)
-    return decorated
-
 def send_passcode(to_email, template, subject):
-    r = requests.post(
-        "https://api.mailgun.net/v3/mg.company.com/messages",
-        auth=("api", MAILGUN_API_KEY),
-        data={"from": "Company<mailgun@mg.company.com>",
-            "to": [to_email],
-            "subject": subject,
-            "html": template
-    })
-    return r.json()['id'].replace('<','').replace('>','')
+    # r = requests.post(
+    #     "https://api.mailgun.net/v3/mg.company.com/messages",
+    #     auth=("api", MAILGUN_API_KEY),
+    #     data={"from": "Company<mailgun@mg.company.com>",
+    #         "to": [to_email],
+    #         "subject": subject,
+    #         "html": template
+    # })
+    # return r.json()['id'].replace('<','').replace('>','')
+
+    # Placeholder
+    return "secret_message_id"
 
 
 if __name__ == "__main__":
-        app.secret_key = 'secret123'
-        app.run(debug=True)
+        app.run(debug=True,port=5050)
 
