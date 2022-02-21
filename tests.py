@@ -53,7 +53,15 @@ class Tests(unittest.TestCase):
 
         print("Test 2 Completed.")
 
+    def test_3_can_access(self):
+        r = self.client.get("/must_be_logged_in", headers={"x-access-token":str(self.token)})
+        r_json = json.loads(r.data)
+        print(r_json)
+        self.assertEqual(r_json['success'],True)
+        print("Test 3 completed.")
+
 if __name__ == "__main__":
     tester = Tests()
     tester.test_1_get_health()
     tester.test_2_login(email="matias.garafoni@gmail.com")
+    tester.test_3_can_access()
