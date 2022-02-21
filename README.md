@@ -1,4 +1,5 @@
 # Welcome to flaskinit
+[![Coverage Status](./coverage-badge.svg?dummy=8484744)](./coverage.xml)
 ## Description
 Flask init is a shell script that creates a basic project structure, with a few dependencies within a virtualenv folder, using python3.6 (which you need to have installed previously, along with virtualenv)
 If you can't execute the script, use $ `chmod +x ./flaskinit.sh` to provide the script with executable permissions. No sudo permissions are required.
