@@ -40,7 +40,7 @@ def token_required(f):
             }), 401
 
         try:
-            data = jwt.decode(token,app.secret_key)
+            data = jwt.decode(token,app.secret_key,algorithms="HS256")
             # validate token life:
             life = data['exp']
             rnow = int(datetime.now().timestamp())
@@ -212,9 +212,9 @@ def renew_token(current_user):
 def generate_token(user):
     exp = int((datetime.now() + timedelta(minutes=TOKEN_LIFE_MINUTES)).timestamp())
     if 'admin' in user and user['admin']:
-        token = jwt.encode({'email':user['email'],'exp':exp,"admin":True},app.secret_key)
+        token = jwt.encode({'email':user['email'],'exp':exp,"admin":True},app.secret_key,algorithm="HS256")
     else:
-        token = jwt.encode({'email':user['email'],'exp':exp},app.secret_key)
+        token = jwt.encode({'email':user['email'],'exp':exp},app.secret_key,algorithm="HS256")
     return token
 
 def send_passcode(to_email, template, subject):
