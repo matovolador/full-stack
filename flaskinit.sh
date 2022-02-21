@@ -5,7 +5,7 @@ cd $path
 python3 -m venv venv
 source venv/bin/activate
 pip install wheel || exit 1
-pip install flask flask_cors flask_sslify mypy psycopg2 requests PyJWT python-dotenv coverage gunicorn || exit 1
+pip install flask flask_cors flask_sslify mypy psycopg2 requests PyJWT python-dotenv coverage genbadge defusedxml gunicorn || exit 1
 pip freeze > requirements.txt
 
 modules_path = ""
