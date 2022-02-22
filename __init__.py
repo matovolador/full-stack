@@ -78,6 +78,11 @@ def index():
     }),200
 
 
+@app.route("/books",methods=["GET","POST"])
+@token_required
+def books(current_user):
+    
+
 
 @app.route("/must_be_logged_in",methods=["GET"])
 @token_required
