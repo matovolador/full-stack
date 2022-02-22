@@ -29,6 +29,8 @@ import logging
 from dotenv import load_dotenv
 sys.path.append("")  # change that if you upload this to remote )(path will differ most likely)
 from modules.db import DB
+from modules.database import get_db
+import modules.models as models
 
 load_dotenv()
 
@@ -60,7 +62,7 @@ def token_required(f):
             }), 401
 
         try:
-            data = jwt.decode(token,app.secret_key)
+            data = jwt.decode(token,app.secret_key,algorithms="HS256")
             # validate token life:
             life = data['exp']
             rnow = int(datetime.now().timestamp())
@@ -98,6 +100,48 @@ def index():
     }),200
 
 
+def is_empty_string_or_none(_str):
+    if _str == '' or _str is None:
+        return True
+    return False
+
+@app.route("/books/<book_id>",methods=["GET"])
+@app.route("/books",defaults={"book_id":None},methods=["POST"])
+@token_required
+def books(current_user,book_id):
+    if request.method=="POST":
+        data = request.get_json()
+        if 'author' not in data or 'name' not in data or is_empty_string_or_none(data['author']) or is_empty_string_or_none(data['name']):
+            return jsonify({
+                "success": False,
+                "message": "Missing params"
+            })
+        db = next(get_db())
+        book = models.Book(name=data['name'],author=data['author'])
+        db.add(book)
+        db.commit()
+        user_book_assoc = models.UserBookAssociation(user_id=current_user['id'],book_id=book.id)
+        db.add(user_book_assoc)
+        db.commit()
+        return jsonify({
+            "success":True,
+            "id": book.id
+        })
+    elif request.method=="GET":
+        db = next(get_db())
+        book = db.query(models.Book).get(int(book_id))
+        # confirm that book belongs to current user
+        assoc = db.query(models.UserBookAssociation).filter_by(user_id=current_user['id'],book_id=int(book_id))
+        if not assoc:
+            return jsonify({
+                "success":False,
+                "message": "This user does not have this book."
+            })
+        return jsonify({
+            "success": True,
+            "book": book.as_dict()
+        })
+        
 
 @app.route("/must_be_logged_in",methods=["GET"])
 @token_required
@@ -232,9 +276,9 @@ def renew_token(current_user):
 def generate_token(user):
     exp = int((datetime.now() + timedelta(minutes=TOKEN_LIFE_MINUTES)).timestamp())
     if 'admin' in user and user['admin']:
-        token = jwt.encode({'email':user['email'],'exp':exp,"admin":True},app.secret_key)
+        token = jwt.encode({'email':user['email'],'exp':exp,"admin":True},app.secret_key,algorithm="HS256")
     else:
-        token = jwt.encode({'email':user['email'],'exp':exp},app.secret_key)
+        token = jwt.encode({'email':user['email'],'exp':exp},app.secret_key,algorithm="HS256")
     return token
 
 def send_passcode(to_email, template, subject):
@@ -259,7 +303,7 @@ if __name__ == "__main__":
 
 EOF
 cat <<EOF >.env
-DATABASE_URL=postgres://postgres:secret@localhost:5432/flask_sample5
+DATABASE_URL=postgresql://postgres:secret@localhost:5432/flask_sample5
 EOF
 mkdir modules
 mkdir sql
@@ -440,16 +484,259 @@ class DB():
 
 EOF
 
-cd ..
-cd sql
-cat <<EOF >schema.sql
-CREATE TABLE users (id SERIAL PRIMARY KEY, first_name varchar(250), last_name VARCHAR(250),  email VARCHAR(200) NOT NULL UNIQUE, passcode VARCHAR(100), created TIMESTAMP NOT NULL DEFAULT NOW(), passcode_created TIMESTAMP, last_seen TIMESTAMP DEFAULT now());
+cat <<EOF >database.py
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+import os
+from dotenv import load_dotenv
 
+load_dotenv()
 
-INSERT INTO users (first_name,last_name,email,passcode,passcode_created,last_seen) VALUES ('Matias','Garafoni','matias.garafoni@gmail.com',12345,NOW(),NOW());
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
+
+engine = create_engine(SQLALCHEMY_DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    except:
+        db.close()
 EOF
 
+cat <<EOF >models.py
+from sqlalchemy import Integer, String, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql.schema import Column
+from sqlalchemy.sql import func
+from .database import Base
+
+class User(Base):
+    __tablename__ = 'users'
+
+    id = Column(Integer, primary_key=True)
+    first_name = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
+    email = Column(String, nullable=False)
+    created = Column(DateTime(),nullable=False, default=func.now())
+    last_seen = Column(DateTime(),default=func.now())
+    passcode = Column(Integer)
+    passcode_created = Column(DateTime(),nullable=False)
+
+    def as_dict(self):
+       return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+class Book(Base):
+    __tablename__ = 'books'
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    author = Column(String, nullable=False)
+
+    def as_dict(self):
+       return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+class UserBookAssociation(Base):
+    __tablename__ = 'user_book_associations'
+
+    id = Column(Integer,primary_key=True)
+    user_id = Column(Integer,ForeignKey('users.id'))
+    book_id = Column(Integer,ForeignKey('books.id'))
+    
+    def as_dict(self):
+       return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+EOF
 cd ..
+
+alembic init alembic
+
+echo "from logging.config import fileConfig
+
+from sqlalchemy import engine_from_config
+from sqlalchemy import pool
+
+from alembic import context
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+# this is the Alembic Config object, which provides
+# access to the values within the .ini file in use.
+config = context.config
+
+config.set_main_option('sqlalchemy.url', os.getenv('DATABASE_URL'))
+
+# Interpret the config file for Python logging.
+# This line sets up loggers basically.
+fileConfig(config.config_file_name)
+
+# add your model's MetaData object here
+# for 'autogenerate' support
+# from myapp import mymodel
+# target_metadata = mymodel.Base.metadata
+target_metadata = None
+
+# other values from the config, defined by the needs of env.py,
+# can be acquired:
+# my_important_option = config.get_main_option('my_important_option')
+# ... etc.
+
+
+def run_migrations_offline():
+    #Run migrations in 'offline' mode.
+    #
+    #This configures the context with just a URL and not an Engine, though an Engine is acceptable here as well.  By skipping the Engine creation we don't even need a DBAPI to be available.
+    #
+    #Calls to context.execute() here emit the given string to the script output.
+
+    url = config.get_main_option('sqlalchemy.url')
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={'paramstyle': 'named'},
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online():
+    #Run migrations in 'online' mode.
+    #
+    #In this scenario we need to create an Engine and associate a connection with the context.
+
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section),
+        prefix='sqlalchemy.',
+        poolclass=pool.NullPool,
+    )
+
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection, target_metadata=target_metadata
+        )
+
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+" >| "./alembic/env.py"
+
+cd alembic/versions
+cat <<EOF >355b9905a33f_init.py
+"""init
+
+Revision ID: 355b9905a33f
+Revises: 
+Create Date: 2022-02-21 23:55:53.971143
+
+"""
+from alembic import op
+import sqlalchemy as sa
+import datetime
+
+# revision identifiers, used by Alembic.
+revision = '355b9905a33f'
+down_revision = None
+branch_labels = None
+depends_on = None
+
+def upgrade():
+    op.create_table(
+        'users',
+        sa.Column('id', sa.Integer, primary_key=True),
+        sa.Column('first_name', sa.String, nullable=False),
+        sa.Column('last_name', sa.String, nullable=False),
+        sa.Column('email',sa.String,nullable=False),
+        sa.Column('created',sa.DateTime(timezone=False),nullable=False, default=sa.func.now()),
+        sa.Column('last_seen',sa.DateTime(timezone=False), default=sa.func.now()),
+        sa.Column('passcode',sa.String),
+        sa.Column('passcode_created',sa.DateTime(timezone=False),nullable=False),
+    )
+
+
+def downgrade():
+    op.drop_table('users')
+EOF
+
+cat <<EOF >cd445fc138aa_first_user.py
+"""first_user
+
+Revision ID: cd445fc138aa
+Revises: 355b9905a33f
+Create Date: 2022-02-22 16:44:09.538359
+
+"""
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision = 'cd445fc138aa'
+down_revision = '355b9905a33f'
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    op.execute("INSERT INTO users (first_name,last_name,email,created,passcode,passcode_created,last_seen) VALUES ('Matias','Garafoni','matias.garafoni@gmail.com',NOW(),'12345',NOW(),NOW())")
+
+
+def downgrade():
+    op.execute("DELETE FROM users WHERE email='matias.garafoni@gmail.com'")
+EOF
+
+cat <<EOF >c5e1c4373b3d_books.py
+"""books
+
+Revision ID: c5e1c4373b3d
+Revises: cd445fc138aa
+Create Date: 2022-02-22 18:03:51.814438
+
+"""
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision = 'c5e1c4373b3d'
+down_revision = 'cd445fc138aa'
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    op.create_table(
+        'books',
+        sa.Column('id', sa.Integer, primary_key=True),
+        sa.Column('name', sa.String, nullable=False),
+        sa.Column('author', sa.String, nullable=False)
+    )
+    op.create_table(
+        'user_book_associations',
+        sa.Column('id', sa.Integer, primary_key=True),
+        sa.Column('user_id', sa.Integer,sa.ForeignKey('users.id')),
+        sa.Column('book_id', sa.Integer,sa.ForeignKey('books.id'))
+    )
+     
+
+def downgrade():
+    op.drop_table('user_book_associations')
+    op.drop_table('books')
+EOF
+
+cd ../..
 cd temp
 touch .gitkeep
 cd ..
@@ -470,6 +757,9 @@ from __init__ import app as client_app
 import requests
 from base64 import b64encode
 from datetime import datetime
+import random
+import string
+
 
 
 from modules.db import DB
@@ -519,11 +809,56 @@ class Tests(unittest.TestCase):
 
         print("Test 2 Completed.")
 
+    def test_3_can_access(self):
+        r = self.client.get("/must_be_logged_in", headers={"x-access-token":str(self.token)})
+        r_json = json.loads(r.data)
+        print(r_json)
+        self.assertEqual(r_json['success'],True)
+        print("Test 3 completed.")
+
+    def test_4_create_book(self,author,name,should_fail=False):
+        r = self.client.post("/books",headers={
+            "x-access-token":str(self.token),
+            "Content-Type": "application/json"
+            },data=json.dumps({
+            "author": author,
+            "name": name
+        }))
+        r_json = json.loads(r.data)
+        print(r_json)
+        
+        self.assertEqual(r_json['success'],not should_fail)
+        print("Test 4 completed.")
+        if not should_fail:
+            return r_json['id']
+        else:
+            return
+
+    def test_5_get_book(self,book_id):
+        r = self.client.get("/books/"+str(book_id), headers={"x-access-token":str(self.token)})
+        print(r)
+        print(r.data)
+        r_json = json.loads(r.data)
+        print(r_json)
+        self.assertEqual(r_json['success'],True)
+        print("Test 3 completed.")
+
 if __name__ == "__main__":
     tester = Tests()
     tester.test_1_get_health()
     tester.test_2_login(email="matias.garafoni@gmail.com")
+    tester.test_3_can_access()
+    # printing lowercase
+    letters = string.ascii_lowercase
+    rand_author = ''.join(random.choice(letters) for i in range(10)) + "_author"
+    rand_bookname = ''.join(random.choice(letters) for i in range(10)) + "_bookname"
+    book_id = tester.test_4_create_book(author=rand_author,name=rand_bookname)
+    tester.test_5_get_book(book_id=book_id)
+    tester.test_4_create_book(author='',name='',should_fail=True)
 EOF
+
+source venv/bin/activate
+alembic upgrade head
 
 git init
 cat <<EOF >.gitignore
