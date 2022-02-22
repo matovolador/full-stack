@@ -4,6 +4,9 @@ from __init__ import app as client_app
 import requests
 from base64 import b64encode
 from datetime import datetime
+import random
+import string
+
 
 
 from modules.db import DB
@@ -60,8 +63,37 @@ class Tests(unittest.TestCase):
         self.assertEqual(r_json['success'],True)
         print("Test 3 completed.")
 
+    def test_4_create_book(self,author,name):
+        r = self.client.post("/books",headers={
+            "x-access-token":str(self.token),
+            "Content-Type": "application/json"
+            },data=json.dumps({
+            "author": author,
+            "name": name
+        }))
+        r_json = json.loads(r.data)
+        print(r_json)
+        self.assertEqual(r_json['success'],True)
+        print("Test 4 completed.")
+        return r_json['id']
+
+    def test_5_get_book(self,book_id):
+        r = self.client.get("/books/"+str(book_id), headers={"x-access-token":str(self.token)})
+        print(r)
+        print(r.data)
+        r_json = json.loads(r.data)
+        print(r_json)
+        self.assertEqual(r_json['success'],True)
+        print("Test 3 completed.")
+
 if __name__ == "__main__":
     tester = Tests()
     tester.test_1_get_health()
     tester.test_2_login(email="matias.garafoni@gmail.com")
     tester.test_3_can_access()
+    # printing lowercase
+    letters = string.ascii_lowercase
+    rand_author = ''.join(random.choice(letters) for i in range(10)) + "_author"
+    rand_bookname = ''.join(random.choice(letters) for i in range(10)) + "_bookname"
+    book_id = tester.test_4_create_book(author=rand_author,name=rand_bookname)
+    tester.test_5_get_book(book_id=book_id)

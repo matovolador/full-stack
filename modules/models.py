@@ -1,10 +1,9 @@
-from sqlalchemy import Integer, String, ForeignKey
+from sqlalchemy import Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql.schema import Column
 from sqlalchemy.sql import func
 import datetime
 from .database import Base
-
 
 class User(Base):
     __tablename__ = 'users'
@@ -18,6 +17,8 @@ class User(Base):
     passcode = Column(Integer)
     passcode_created = Column(DateTime(),nullable=False)
 
+    def as_dict(self):
+       return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
 class Book(Base):
     __tablename__ = 'books'
@@ -26,10 +27,15 @@ class Book(Base):
     name = Column(String, nullable=False)
     author = Column(String, nullable=False)
 
+    def as_dict(self):
+       return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
 class UserBookAssociation(Base):
     __tablename__ = 'user_book_associations'
 
     id = Column(Integer,primary_key=True)
-    user_id = Column(Integer,ForeignKey('user.id'))
-    book_id = Column(Integer,ForeignKey('book.id'))
+    user_id = Column(Integer,ForeignKey('users.id'))
+    book_id = Column(Integer,ForeignKey('books.id'))
     
+    def as_dict(self):
+       return {c.name: getattr(self, c.name) for c in self.__table__.columns}

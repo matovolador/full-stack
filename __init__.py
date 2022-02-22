@@ -9,6 +9,8 @@ import logging
 from dotenv import load_dotenv
 sys.path.append("")  # change that if you upload this to remote )(path will differ most likely)
 from modules.db import DB
+from modules.database import get_db
+import modules.models as models
 
 load_dotenv()
 
@@ -78,11 +80,43 @@ def index():
     }),200
 
 
-@app.route("/books",methods=["GET","POST"])
+@app.route("/books/<book_id>",methods=["GET"])
+@app.route("/books",defaults={"book_id":None},methods=["POST"])
 @token_required
-def books(current_user):
-    
-
+def books(current_user,book_id):
+    if request.method=="POST":
+        data = request.get_json()
+        if 'author' not in data or 'name' not in data:
+            return jsonify({
+                "success": False,
+                "message": "Missing params"
+            })
+        db = next(get_db())
+        book = models.Book(name=data['name'],author=data['author'])
+        db.add(book)
+        db.commit()
+        user_book_assoc = models.UserBookAssociation(user_id=current_user['id'],book_id=book.id)
+        db.add(user_book_assoc)
+        db.commit()
+        return jsonify({
+            "success":True,
+            "id": book.id
+        })
+    elif request.method=="GET":
+        db = next(get_db())
+        book = db.query(models.Book).get(int(book_id))
+        # confirm that book belongs to current user
+        assoc = db.query(models.UserBookAssociation).filter_by(user_id=current_user['id'],book_id=int(book_id))
+        if not assoc:
+            return jsonify({
+                "success":False,
+                "message": "This user does not have this book."
+            })
+        return jsonify({
+            "success": True,
+            "book": book.as_dict()
+        })
+        
 
 @app.route("/must_be_logged_in",methods=["GET"])
 @token_required
