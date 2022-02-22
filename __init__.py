@@ -80,13 +80,18 @@ def index():
     }),200
 
 
+def is_empty_string_or_none(_str):
+    if _str == '' or _str is None:
+        return True
+    return False
+
 @app.route("/books/<book_id>",methods=["GET"])
 @app.route("/books",defaults={"book_id":None},methods=["POST"])
 @token_required
 def books(current_user,book_id):
     if request.method=="POST":
         data = request.get_json()
-        if 'author' not in data or 'name' not in data:
+        if 'author' not in data or 'name' not in data or is_empty_string_or_none(data['author']) or is_empty_string_or_none(data['name']):
             return jsonify({
                 "success": False,
                 "message": "Missing params"

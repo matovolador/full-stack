@@ -63,7 +63,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(r_json['success'],True)
         print("Test 3 completed.")
 
-    def test_4_create_book(self,author,name):
+    def test_4_create_book(self,author,name,should_fail=False):
         r = self.client.post("/books",headers={
             "x-access-token":str(self.token),
             "Content-Type": "application/json"
@@ -73,9 +73,13 @@ class Tests(unittest.TestCase):
         }))
         r_json = json.loads(r.data)
         print(r_json)
-        self.assertEqual(r_json['success'],True)
+        
+        self.assertEqual(r_json['success'],not should_fail)
         print("Test 4 completed.")
-        return r_json['id']
+        if not should_fail:
+            return r_json['id']
+        else:
+            return
 
     def test_5_get_book(self,book_id):
         r = self.client.get("/books/"+str(book_id), headers={"x-access-token":str(self.token)})
@@ -97,3 +101,4 @@ if __name__ == "__main__":
     rand_bookname = ''.join(random.choice(letters) for i in range(10)) + "_bookname"
     book_id = tester.test_4_create_book(author=rand_author,name=rand_bookname)
     tester.test_5_get_book(book_id=book_id)
+    tester.test_4_create_book(author='',name='',should_fail=True)
