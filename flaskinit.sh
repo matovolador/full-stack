@@ -643,11 +643,7 @@ from base64 import b64encode
 from datetime import datetime
 import random
 import string
-
-
-
-from modules.db import DB
-
+import modules.database as database
 
 
 class Tests(unittest.TestCase):
@@ -673,11 +669,10 @@ class Tests(unittest.TestCase):
         print(r_json)
         self.assertEqual(r_json['success'],True)
         
-        db = DB()
-        user = db.get_user_by_email(email)
-        db.connection.close()
+        db = next(database.get_db())
+        user = db.query(database.User).filter_by(email=email).first()
         if user:
-            passcode = user['passcode']
+            passcode = user.passcode
         else:
             print("Could not find user")
             self.assertEqual(True,False)
