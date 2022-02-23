@@ -9,8 +9,7 @@ import logging
 from dotenv import load_dotenv
 sys.path.append("")  # change that if you upload this to remote )(path will differ most likely)
 from modules.db import DB
-from modules.database import get_db
-import modules.models as models
+import modules.database as database
 
 load_dotenv()
 
@@ -96,11 +95,11 @@ def books(current_user,book_id):
                 "success": False,
                 "message": "Missing params"
             })
-        db = next(get_db())
-        book = models.Book(name=data['name'],author=data['author'])
+        db = next(database.get_db())
+        book = database.Book(name=data['name'],author=data['author'])
         db.add(book)
         db.commit()
-        user_book_assoc = models.UserBookAssociation(user_id=current_user['id'],book_id=book.id)
+        user_book_assoc = database.UserBookAssociation(user_id=current_user['id'],book_id=book.id)
         db.add(user_book_assoc)
         db.commit()
         return jsonify({
@@ -108,10 +107,10 @@ def books(current_user,book_id):
             "id": book.id
         })
     elif request.method=="GET":
-        db = next(get_db())
-        book = db.query(models.Book).get(int(book_id))
+        db = next(database.get_db())
+        book = db.query(database.Book).get(int(book_id))
         # confirm that book belongs to current user
-        assoc = db.query(models.UserBookAssociation).filter_by(user_id=current_user['id'],book_id=int(book_id))
+        assoc = db.query(database.UserBookAssociation).filter_by(user_id=current_user['id'],book_id=int(book_id))
         if not assoc:
             return jsonify({
                 "success":False,
