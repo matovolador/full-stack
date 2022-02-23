@@ -7,8 +7,6 @@ from functools import wraps
 from datetime import datetime, timedelta
 import logging
 from dotenv import load_dotenv
-sys.path.append("")  # change that if you upload this to remote )(path will differ most likely)
-from modules.db import DB
 import modules.database as database
 
 load_dotenv()
@@ -27,14 +25,13 @@ sslify = SSLify(app)
 def token_required(f):
     @wraps(f)
     def decorated(*args,**kwargs):
-        db = DB()
+        db = next(database.get_db())
         token = None
 
         if 'x-access-token' in request.headers:
             token = request.headers['x-access-token']
 
         if not token:
-            db.connection.close()
             return jsonify({
                 "success": False,
                 "message": "Token is missing!"
@@ -46,23 +43,21 @@ def token_required(f):
             life = data['exp']
             rnow = int(datetime.now().timestamp())
             if rnow > life:
-                db.connection.close()
                 # token no longer valid:
                 return jsonify({
                     "message":"Token has expired. Please login again.",
                     "success": False
                 }), 401
-            current_user = db.get_user_by_email(data['email'])
+            current_user = db.query(database.User).filter_by(email=data['email']).first()
+            current_user = current_user.as_dict()
             if is_admin({'email':data['email']}):
                 current_user['admin'] = True
 
         except Exception as e:
-            db.connection.close()
             return jsonify({
                 "message": "Token is invalid. "+str(e),
                 "success": False
             }), 401
-        db.connection.close()
         if not current_user:
             return jsonify({
                     "message": "User is invalid",
@@ -110,7 +105,7 @@ def books(current_user,book_id):
         db = next(database.get_db())
         book = db.query(database.Book).get(int(book_id))
         # confirm that book belongs to current user
-        assoc = db.query(database.UserBookAssociation).filter_by(user_id=current_user['id'],book_id=int(book_id))
+        assoc = db.query(database.UserBookAssociation).filter_by(user_id=current_user['id'],book_id=int(book_id)).first()
         if not assoc:
             return jsonify({
                 "success":False,
@@ -135,24 +130,22 @@ def login():
     if request.method == "GET":
         email = request.args.get("email")
         if email:
-            db = DB()
-            user = db.get_user_by_email(email)
+            db = next(database.get_db())
+            user = db.query(database.User).filter_by(email=email).first()
             if not user:
                 db.connection.close()
                 return jsonify({
                     "success": False,
                     "message": "User not found."
                 })
-            new_passcode = db.update_user_passcode(email)
+            new_passcode = database.User.update_user_passcode(email)
             if not new_passcode:
-                db.connection.close()
                 return jsonify({
                     "success":False,
                     "message": "User not found."
                 })
-            db.connection.close()
             try:
-                flag = send_passcode(email,user['first_name'],new_passcode)
+                flag = send_passcode(email,user.first_name,new_passcode)
                 if flag:
                     return jsonify({
                         "success": True,
@@ -184,11 +177,11 @@ def login():
 
         email = auth.username
         passcode = auth.password
-        db = DB()
-        result = db.login_user(email,passcode)
+        db = next(database.get_db())
+        user = db.query(database.User).filter_by(email=email).first()
+        result = database.User.login_user(email,passcode)
         if result['success']:
             token = generate_token(result['data'])
-            db.connection.close()
             admin = is_admin(result['data'])
             return jsonify({
                 "success": True,
@@ -205,10 +198,8 @@ def login():
             if result['error'] == 102:
                 # send mailgun
                 # send_mailgun(email,result['data']['new_passcode'])
-                user = db.get_user_by_email(email)
-                db.connection.close()
                 try:
-                    flag = send_passcode(email,user['first_name'],result['data']['new_passcode'])
+                    flag = send_passcode(email,user.first_name,result['data']['new_passcode'])
                     if flag:
                         return jsonify({
                             "success": True,
@@ -229,6 +220,7 @@ def login():
                 
             if result['error']:
                 return make_response('Could not verify',401, {'WWW-Authenticate': 'Basic realm="Login required"'})
+
 def is_admin(user_data):
     email = user_data['email']
     domain = email[email.rfind("@")+1:]

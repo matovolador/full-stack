@@ -27,10 +27,7 @@ from functools import wraps
 from datetime import datetime, timedelta
 import logging
 from dotenv import load_dotenv
-sys.path.append("")  # change that if you upload this to remote )(path will differ most likely)
-from modules.db import DB
-from modules.database import get_db
-import modules.models as models
+import modules.database as database
 
 load_dotenv()
 
@@ -48,14 +45,13 @@ sslify = SSLify(app)
 def token_required(f):
     @wraps(f)
     def decorated(*args,**kwargs):
-        db = DB()
+        db = next(database.get_db())
         token = None
 
         if 'x-access-token' in request.headers:
             token = request.headers['x-access-token']
 
         if not token:
-            db.connection.close()
             return jsonify({
                 "success": False,
                 "message": "Token is missing!"
@@ -67,23 +63,21 @@ def token_required(f):
             life = data['exp']
             rnow = int(datetime.now().timestamp())
             if rnow > life:
-                db.connection.close()
                 # token no longer valid:
                 return jsonify({
                     "message":"Token has expired. Please login again.",
                     "success": False
                 }), 401
-            current_user = db.get_user_by_email(data['email'])
+            current_user = db.query(database.User).filter_by(email=data['email']).first()
+            current_user = current_user.as_dict()
             if is_admin({'email':data['email']}):
                 current_user['admin'] = True
 
         except Exception as e:
-            db.connection.close()
             return jsonify({
                 "message": "Token is invalid. "+str(e),
                 "success": False
             }), 401
-        db.connection.close()
         if not current_user:
             return jsonify({
                     "message": "User is invalid",
@@ -116,11 +110,11 @@ def books(current_user,book_id):
                 "success": False,
                 "message": "Missing params"
             })
-        db = next(get_db())
-        book = models.Book(name=data['name'],author=data['author'])
+        db = next(database.get_db())
+        book = database.Book(name=data['name'],author=data['author'])
         db.add(book)
         db.commit()
-        user_book_assoc = models.UserBookAssociation(user_id=current_user['id'],book_id=book.id)
+        user_book_assoc = database.UserBookAssociation(user_id=current_user['id'],book_id=book.id)
         db.add(user_book_assoc)
         db.commit()
         return jsonify({
@@ -128,10 +122,10 @@ def books(current_user,book_id):
             "id": book.id
         })
     elif request.method=="GET":
-        db = next(get_db())
-        book = db.query(models.Book).get(int(book_id))
+        db = next(database.get_db())
+        book = db.query(database.Book).get(int(book_id))
         # confirm that book belongs to current user
-        assoc = db.query(models.UserBookAssociation).filter_by(user_id=current_user['id'],book_id=int(book_id))
+        assoc = db.query(database.UserBookAssociation).filter_by(user_id=current_user['id'],book_id=int(book_id)).first()
         if not assoc:
             return jsonify({
                 "success":False,
@@ -156,24 +150,22 @@ def login():
     if request.method == "GET":
         email = request.args.get("email")
         if email:
-            db = DB()
-            user = db.get_user_by_email(email)
+            db = next(database.get_db())
+            user = db.query(database.User).filter_by(email=email).first()
             if not user:
                 db.connection.close()
                 return jsonify({
                     "success": False,
                     "message": "User not found."
                 })
-            new_passcode = db.update_user_passcode(email)
+            new_passcode = database.User.update_user_passcode(email)
             if not new_passcode:
-                db.connection.close()
                 return jsonify({
                     "success":False,
                     "message": "User not found."
                 })
-            db.connection.close()
             try:
-                flag = send_passcode(email,user['first_name'],new_passcode)
+                flag = send_passcode(email,user.first_name,new_passcode)
                 if flag:
                     return jsonify({
                         "success": True,
@@ -205,11 +197,11 @@ def login():
 
         email = auth.username
         passcode = auth.password
-        db = DB()
-        result = db.login_user(email,passcode)
+        db = next(database.get_db())
+        user = db.query(database.User).filter_by(email=email).first()
+        result = database.User.login_user(email,passcode)
         if result['success']:
             token = generate_token(result['data'])
-            db.connection.close()
             admin = is_admin(result['data'])
             return jsonify({
                 "success": True,
@@ -226,10 +218,8 @@ def login():
             if result['error'] == 102:
                 # send mailgun
                 # send_mailgun(email,result['data']['new_passcode'])
-                user = db.get_user_by_email(email)
-                db.connection.close()
                 try:
-                    flag = send_passcode(email,user['first_name'],result['data']['new_passcode'])
+                    flag = send_passcode(email,user.first_name,result['data']['new_passcode'])
                     if flag:
                         return jsonify({
                             "success": True,
@@ -250,6 +240,7 @@ def login():
                 
             if result['error']:
                 return make_response('Could not verify',401, {'WWW-Authenticate': 'Basic realm="Login required"'})
+
 def is_admin(user_data):
     email = user_data['email']
     domain = email[email.rfind("@")+1:]
@@ -300,7 +291,6 @@ if __name__ == "__main__":
         app.run(debug=True,port=5050)
 
 
-
 EOF
 cat <<EOF >.env
 DATABASE_URL=postgresql://postgres:secret@localhost:5432/flask_sample5
@@ -312,182 +302,17 @@ mkdir bin
 
 cd modules
 touch __init__.py
-cat <<EOF >db.py
-import psycopg2, psycopg2.extras
-from datetime import datetime
-import os
-import json
-import uuid
-import urllib.parse
-import string
-import random
-import traceback
-import logging
-from dotenv import load_dotenv
-
-load_dotenv()
-
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s', datefmt='%Y-%m-%d:%H:%M:%S')
-
-PASSCODE_DURATION_MINUTES = 15
-
-class DB():
-
-    ERROR_CODES = {
-            100: "User does not exist",
-            101: "Passcode does not match.",
-            102: "Passcode expired."
-        }
-
-    def __init__(self):
-        urllib.parse.uses_netloc.append("postgres")
-        url = urllib.parse.urlparse(os.getenv("DATABASE_URL"))
-
-        self.connection = psycopg2.connect(
-            database=url.path[1:],
-            user=url.username,
-            password=url.password,
-            host=url.hostname,
-            port=url.port
-        )
-
-
-    # Returns a dict cursor
-    def get_cursor(self):
-        return self.connection.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
-
-    def get_user(self,_id):
-        cursor = self.get_cursor()
-        cursor.execute("SELECT * FROM users WHERE id=%s",[_id])
-        row = cursor.fetchone()
-        if row:
-            return dict(row)
-        return False
-
-    def get_users(self):
-        cursor = self.get_cursor()
-        cursor.execute("SELECT * FROM users ORDER BY id ASC")
-        rows = cursor.fetchall()
-        users = []
-        for row in rows:
-            users.append(dict(row))
-        return users
-
-    def get_user_by_email(self,email):
-        cursor = self.get_cursor()
-        # check if email exists:
-        cursor.execute("SELECT * FROM users WHERE email=%s LIMIT 1",[email])
-        row = cursor.fetchone()
-        if row:
-            return dict(row)
-        return False
-
-    def create_user(self,email,first_name,last_name):
-        passcode = self.create_passcode()
-        cursor = self.get_cursor()
-        # check if email exists:
-        user = self.get_user_by_email(email)
-        if user:
-            return False
-
-        cursor.execute("INSERT INTO users (first_name,last_name,email,passcode,passcode_created) VALUES (%s,%s,%s,%s,%s)",[first_name,last_name,email,passcode,datetime.now()])
-        self.connection.commit()
-        return passcode
-
-    def delete_user(self,user_id):
-        cur = self.get_cursor()
-        cur.execute("DELETE FROM users WHERE id=%s",[user_id])
-        self.connection.commit()
-        return True
-
-    def login_user(self,email,passcode,passcode_bypass=False):
-        cursor = self.get_cursor()
-        cursor.execute("SELECT * FROM users WHERE email = %s",[email])
-        row = cursor.fetchone()
-        if not row:
-            return {
-                "success": False,
-                "error" : 100
-            }
-        user = dict(row)
-        if not passcode_bypass:
-            passcode_created = user['passcode_created']
-            timediff = datetime.now() - passcode_created
-            if timediff.seconds / 60 <= PASSCODE_DURATION_MINUTES:
-                # Passcode still valid:
-                if passcode != user['passcode']:
-                    return {
-                        "success" : False,
-                        "error" : 101
-                    }
-                # update last_seen
-                cursor.execute("UPDATE users SET last_seen=%s WHERE email=%s",[datetime.now(),email])
-                self.connection.commit()
-                return {
-                    "success": True,
-                    "data": user
-                }
-
-            # passcode invalid
-            
-            new_passcode = self.update_user_passcode(email)
-            return {
-                "success" : False,
-                "error": 102,
-                "data": {
-                    "new_passcode": new_passcode
-                }
-            }
-        else:
-            # update last_seen
-            cursor.execute("UPDATE users SET last_seen=%s WHERE email=%s",[datetime.now(),email])
-            self.connection.commit()
-            return {
-                "success": True,
-                "data": user
-            }
-
-
-    def update_user_passcode(self,email,force_reset=False):
-        cursor = self.get_cursor()
-        if not force_reset:
-            cursor.execute("SELECT * FROM users WHERE email=%s",[email])
-            user = cursor.fetchone()
-            if not user:
-                return False
-            current_passcode = user['passcode']
-            current_passcode_created = user['passcode_created']
-            now = datetime.now()
-            delta = (now - current_passcode_created).total_seconds()
-            if delta <= 60:
-                return current_passcode
-
-        passcode = self.create_passcode()
-        cursor.execute("UPDATE users SET passcode=%s, passcode_created=%s WHERE email=%s RETURNING id",[passcode,datetime.now(),email])
-        self.connection.commit()
-        _id = False
-        result = cursor.fetchone()
-        if result:
-            _id = result[0]
-        if _id:
-            return passcode
-        else:
-            return False
-
-
-    def create_passcode(self):
-        size = 6
-        return ''.join(random.choices(string.digits, k=size))
-
-
-EOF
 
 cat <<EOF >database.py
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import Integer, String, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql.schema import Column
+from sqlalchemy.sql import func
+from datetime import datetime
+import string,random
 import os
 from dotenv import load_dotenv
 
@@ -506,14 +331,8 @@ def get_db():
         yield db
     except:
         db.close()
-EOF
 
-cat <<EOF >models.py
-from sqlalchemy import Integer, String, DateTime, ForeignKey
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql.schema import Column
-from sqlalchemy.sql import func
-from .database import Base
+PASSCODE_DURATION_MINUTES = 15
 
 class BaseMixin(object):
     def as_dict(self):
@@ -532,6 +351,71 @@ class User(BaseMixin,Base):
     passcode = Column(Integer)
     passcode_created = Column(DateTime(),nullable=False)
 
+    @classmethod
+    def login_user(self,email,passcode,passcode_bypass=False):
+        db = next(get_db())
+        user = db.query(self).filter_by(email=email).first()
+        if not user:
+            return {
+                "success": False,
+                "error" : 100 # "User does not exist"
+            }
+        passcode_created = user.passcode_created
+        timediff = datetime.now() - passcode_created
+        if timediff.seconds / 60 <= PASSCODE_DURATION_MINUTES:
+            # Passcode still valid:
+            if passcode != user.passcode:
+                return {
+                    "success" : False,
+                    "error" : 101 # "Passcode does not match."
+                }
+            # update last_seen
+            # update last_seen
+            user.last_seen = datetime.now()
+            db.commit()
+            return {
+                "success": True,
+                "data": user.as_dict()
+            }
+
+        # passcode invalid
+        
+        new_passcode = self.update_user_passcode(email)
+        return {
+            "success" : False,
+            "error": 102, # "Passcode expired."
+            "data": {
+                "new_passcode": new_passcode
+            }
+        }
+        
+
+    @classmethod
+    def update_user_passcode(self,email,force_reset=False):
+        db = next(get_db())
+        if not force_reset:
+            user = db.query(self).filter_by(email=email).first()
+            if not user:
+                return False
+            print(user)
+            current_passcode = user.passcode
+            current_passcode_created = user.passcode_created
+            now = datetime.now()
+            delta = (now - current_passcode_created).total_seconds()
+            if delta <= 60:
+                return current_passcode
+
+        passcode = self.create_passcode()
+        user.passcode=passcode
+        user.passcode_created = datetime.now()
+        db.commit()
+        return passcode
+        
+    @classmethod
+    def create_passcode(self):
+        size = 6
+        return ''.join(random.choices(string.digits, k=size))
+
 
 class Book(BaseMixin,Base):
     __tablename__ = 'books'
@@ -547,8 +431,8 @@ class UserBookAssociation(BaseMixin,Base):
     id = Column(Integer,primary_key=True)
     user_id = Column(Integer,ForeignKey('users.id'))
     book_id = Column(Integer,ForeignKey('books.id'))
-    
-    
+EOF
+
 EOF
 cd ..
 
