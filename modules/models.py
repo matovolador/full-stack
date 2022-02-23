@@ -15,7 +15,7 @@ class User(BaseMixin,Base):
     id = Column(Integer, primary_key=True)
     first_name = Column(String, nullable=False)
     last_name = Column(String, nullable=False)
-    email = Column(String, nullable=False)
+    email = Column(String, nullable=False,unique=True)
     created = Column(DateTime(),nullable=False, default=func.now())
     last_seen = Column(DateTime(),default=func.now())
     passcode = Column(Integer)
