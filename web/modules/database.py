@@ -87,16 +87,16 @@ class User(BaseMixin,Base):
     @classmethod
     def update_user_passcode(self,email,force_reset=False):
         db = next(get_db())
-        if not force_reset:
             user = db.query(self).filter_by(email=email).first()
             if not user:
                 return False
+        if not force_reset:
             print(user)
             current_passcode = user.passcode
             current_passcode_created = user.passcode_created
             now = datetime.now()
             delta = (now - current_passcode_created).total_seconds()
-            if delta <= 60:
+            if delta <= PASSCODE_DURATION_MINUTES:
                 return current_passcode
 
         passcode = self.create_passcode()
