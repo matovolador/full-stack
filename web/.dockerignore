@@ -5,3 +5,9 @@ _labs
 __pycache__
 temp/*
 !temp/.gitkeep
+.coverage
+coverage-badge.svg
+coverage.xml
+coverage.lcov
+htmlcov
+coverageme.sh
