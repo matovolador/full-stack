@@ -87,9 +87,9 @@ class User(BaseMixin,Base):
     @classmethod
     def update_user_passcode(self,email,force_reset=False):
         db = next(get_db())
-            user = db.query(self).filter_by(email=email).first()
-            if not user:
-                return False
+        user = db.query(self).filter_by(email=email).first()
+        if not user:
+            return False
         if not force_reset:
             print(user)
             current_passcode = user.passcode
