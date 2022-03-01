@@ -20,6 +20,7 @@ The Flask API itself comes with some base routes and some basic stuff to get you
 The structure is made so that you include all your custom classes inside the modules folder, and all your "execute" files inside the bin folder.
 
 ## "Dev" Usage
+If you are using the dev branch for local test and development:
 1) Deploy database: `$ docker-compose up --build -d db`
 2) Go into `web` folder
 3) Run app: 
