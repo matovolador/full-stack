@@ -268,5 +268,5 @@ def send_passcode(to_email, template, subject):
 
 
 if __name__ == "__main__":
-        app.run(host='0.0.0.0',debug=os.getenv("DEBUG"),port=5050)
+        app.run(host='0.0.0.0',debug=True,port=5050)
 
