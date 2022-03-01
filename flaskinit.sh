@@ -293,7 +293,7 @@ if __name__ == "__main__":
 
 EOF
 cat <<EOF >.env
-DATABASE_URL=postgresql://postgres:secret@localhost:5432/flask_sample5
+DATABASE_URL=postgresql://postgres:secret@localhost:5432/flaskinit
 EOF
 mkdir modules
 mkdir sql

@@ -19,7 +19,7 @@ TOKEN_LIFE_MINUTES = 60
 app = Flask(__name__)
 app.secret_key = 'asd123asd12341asd123'
 CORS(app, supports_credentials=True)
-sslify = SSLify(app)
+# sslify = SSLify(app)
 
 
 def token_required(f):
@@ -268,5 +268,5 @@ def send_passcode(to_email, template, subject):
 
 
 if __name__ == "__main__":
-        app.run(debug=True,port=5050)
+        app.run(host='0.0.0.0',debug=os.getenv("DEBUG"),port=5050)
 
