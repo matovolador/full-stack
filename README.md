@@ -19,6 +19,15 @@ Deployment of all images (nginx reverse proxy, postgres DB and flask API) are do
 The Flask API itself comes with some base routes and some basic stuff to get you started quickly into adding more routes. It also comes with unittests, codecoverage, and alembic database migrations and SQL_Alchemy
 The structure is made so that you include all your custom classes inside the modules folder, and all your "execute" files inside the bin folder.
 
+## "Dev" Usage
+1) Deploy database: `$ docker-compose up --build -d db`
+2) Go into `web` folder
+3) Run app: 
+`$ source venv/bin/activate`
+`$ python __init__.py`
+4) Run tests and coverage:
+`$ ./coverageme.sh`
+
 ### Migrations, Unittests and Code Coverage
 Migrations, unit tests and code coverage badges and analysis are all executed automatically by the deploy script: `./deploy.sh`
 If you wish to get rid of the database alterations that were made by alembic, just run `alembic downgrade base` using the web/venv/bin/python interpreter and you can then remove the revisions from their folder, and start writing your own models inside `./web/modules/database.py`. Please refer to Alembic documentation on how to create revisions and use migration commands.
