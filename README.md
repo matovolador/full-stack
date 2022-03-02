@@ -38,3 +38,8 @@ If you wish to get rid of the database alterations that were made by alembic, ju
 
 ## TODOs
 * Need to add more info on how docker was implemented
+
+### Docker Cheatsheet
+* `$ docker-compose ps` Gets the status of docker images.
+* `$ docker-compose logs` Gets logs of images.
+* `$ docker exec -it <docker_image_name> /bin/bash` Allows bash execution inside the docker container.
