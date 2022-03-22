@@ -1,0 +1,57 @@
+version: '3.7'
+
+services:
+  proxy:
+    build: proxy
+    restart: always
+    ports:
+      - 80:80
+    networks:
+      - flask_network
+      - web_network
+
+  vue:
+    build: frontend
+    restart: always
+    ports:
+      - 80:80
+    networks:
+      - web_network
+    depends_on:
+      - 'proxy'
+      - 'flask_app'
+
+  db:
+    image: postgres:13
+    restart: always
+    ports:
+      - 5432:5432
+    networks:
+      - flask_network
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=flaskinit
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  flask_app:
+    build: backend
+    restart: always
+    ports:
+      - 5050:5050
+    environment:
+      - DEBUG=0
+    networks:
+      - flask_network
+    depends_on:
+      - 'db'
+      - 'proxy'
+    command: ["./wait-for-it.sh","db:5432","--","./start_app.sh"]
+
+networks:
+  flask_network:
+  web_network:
+
+volumes:
+  postgres_data:
