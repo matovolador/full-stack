@@ -5,3 +5,4 @@ _labs
 __pycache__
 temp/*
 !temp/.gitkeep
+node_modules

@@ -12,14 +12,13 @@ services:
   db:
     image: postgres:13
     restart: always
-    ports:
-      - 5432:5432
     networks:
       - flask_network
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=secret
       - POSTGRES_DB=flaskinit
+      - PGPORT=5432
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
